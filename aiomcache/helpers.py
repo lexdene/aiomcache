@@ -17,12 +17,14 @@ class PyLibMCFlags(IntEnum):
 def pylibmc_get_flag_handler(value, flags):
     if flags == PyLibMCFlags.PYLIBMC_FLAG_PICKLE:
         return pickle.loads(value)
+    elif flags == PyLibMCFlags.PYLIBMC_FLAG_INTEGER:
+        return int(value)
     elif flags == PyLibMCFlags.PYLIBMC_FLAG_LONG:
         return int(value)
     elif flags == PyLibMCFlags.PYLIBMC_FLAG_BOOL:
         return bool(int(value))
     else:
-        assert False  # pragma: no cover
+        raise ValueError('no such flags: %s' % flags)
 
 
 # see _PylibMC_serialize_native in:
