@@ -11,7 +11,6 @@ __all__ = ['Client']
 
 
 def acquire(func):
-
     @asyncio.coroutine
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -27,14 +26,33 @@ def acquire(func):
     return wrapper
 
 
-class Client(object):
-
+class Client:
     def __init__(self, host, port=11211, *,
-                 pool_size=2, pool_minsize=None, loop=None):
+                 pool_size=2, pool_minsize=None, loop=None,
+                 get_flag_handler=None, set_flag_handler=None):
+        """
+        Creates new Client instance.
+
+        :param host: memcached host
+        :param port: memcached port
+        :param pool_size: max connection pool size
+        :param pool_minsize: min connection pool size
+        :param loop: asyncio loop instance
+        :param get_flag_handler: async method to call to convert flagged
+            values. Method takes tuple: (value, flags) and should return
+            processed value or raise ClientException if not supported.
+        :param set_flag_handler: async method to call to convert non bytes
+            value to flagged value. Method takes value and must return tuple:
+            (value, flags).
+        """
         if not pool_minsize:
             pool_minsize = pool_size
+
         self._pool = MemcachePool(
             host, port, minsize=pool_minsize, maxsize=pool_size, loop=loop)
+
+        self._get_flag_handler = get_flag_handler
+        self._set_flag_handler = set_flag_handler
 
     # key supports ascii sans space and control chars
     # \x21 is !, right after space, and \x7e is -, right before DEL
@@ -103,12 +121,14 @@ class Client(object):
                 flags = int(terms[2])
                 length = int(terms[3])
 
-                if flags != 0:
-                    raise ClientException('received non zero flags')
-
                 val = (yield from conn.reader.readexactly(length+2))[:-2]
                 if key in received:
                     raise ClientException('duplicate results from server')
+
+                if flags and self._get_flag_handler:
+                    val = yield from self._get_flag_handler(val, flags)
+                elif flags != 0:
+                    raise ClientException('received non zero flags')
 
                 received[key] = val
                 cas_tokens[key] = int(terms[4]) if with_cas else None
@@ -223,6 +243,10 @@ class Client(object):
             raise ValidationException('exptime not int', exptime)
         elif exptime < 0:
             raise ValidationException('exptime negative', exptime)
+
+        if flags == 0 and self._set_flag_handler and \
+                not isinstance(value, bytes):
+            value, flags = yield from self._set_flag_handler(value)
 
         args = [str(a).encode('utf-8') for a in (flags, exptime, len(value))]
         _cmd = b' '.join([command, key] + args)
