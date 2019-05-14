@@ -102,6 +102,9 @@ class Client:
         if not keys:
             return {}, {}
 
+        # never use cas
+        with_cas = False
+
         [self._validate_key(key) for key in keys]
         if len(set(keys)) != len(keys):
             raise ClientException('duplicate keys passed to multi_get')
